@@ -10,6 +10,7 @@
 
 import { Hono } from "hono";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { WorkflowEntrypoint} from 'cloudflare:workers'
 
 const app = new Hono();
 
@@ -65,9 +66,11 @@ export default app;
 
 app.post('/notes', async (c) => {
 	const { text } = await c.req.json();
-	if (!text) return c.text("Missing text", 400);
-	await c.env.RAG_WORKFLOW.create({ params: { text } })
-	console.log("hi kjsdfhdskj")
+	if (!text) {
+		console.error("Missing text in request body");
+		return c.text("Missing text", 400);
+	}
+	await c.env.RAG_WORKFLOW.create({ params: {text} });
 	return c.text("Created note", 201);
 })
 
@@ -83,40 +86,44 @@ app.delete("/notes/:id", async (c) => {
   });
 
 
-export class RAGWorkflow {
+export class RAGWorkflow extends WorkflowEntrypoint {
 	async run(event, step) {
+		const env = this.env
+		const {text} = event.payload;
 
-		console.log("hi anni")
-	  	const { text } = event.params
+		if (!text) {
+			console.error("Received undefined text in workflow", text, params);
+			throw new Error("Missing text parameter");
+		}
   
-	  	const record = await step.do('create database record', async () => {
-			const query = "INSERT INTO notes (text) VALUES (?) RETURNING *"
+	   	const record = await step.do('create database record', async () => {
+	 		const query = "INSERT INTO notes (text) VALUES (?) RETURNING *"
 	
-			const { results } = await env.DATABASE.prepare(query)
-				.bind(text)
-				.run()
+	 		const { results } = await env.DB.prepare(query)
+	 			.bind(text)
+	 			.run()
 	
-			const record = results[0]
-			if (!record) throw new Error("Failed to create note")
-			return record;
+	 		const record = results[0]
+	 		if (!record) throw new Error("Failed to create note")
+	 		return record;
 
-			})
+	 		})
   
-	  	const embedding = await step.do('generate embedding', async () => {
-			const embeddings = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: text })
-			const values = embeddings.data[0]
-			if (!values) throw new Error("Failed to generate vector embedding")
-			return values
-			})
+	   	const embedding = await step.do('generate embedding', async () => {
+	 		const embeddings = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: text })
+	 		const values = embeddings.data[0]
+	 		if (!values) throw new Error("Failed to generate vector embedding")
+	 		return values
+	 		})
 	
-			await step.do(`insert vector`, async () => {
-				return env.VECTOR_INDEX.upsert([
-				{
-					id: record.id.toString(),
-					values: embedding,
-				}
-			]);
-	  })
+	 		await step.do(`insert vector`, async () => {
+	 			return env.VECTOR_INDEX.upsert([
+	 			{
+	 				id: record.id.toString(),
+	 				values: embedding,
+	 			}
+	 		]);
+	   })
 	}
 }
 

@@ -28,7 +28,7 @@
   ],
   "workflows": [
     {
-      "name": "rag",
+      "name": "rag-ai-tutorial",
       "binding": "RAG_WORKFLOW",
       "class_name": "RAGWorkflow"
     }
